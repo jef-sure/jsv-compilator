@@ -33,10 +33,11 @@ sub load_schema {
     walkdepth(
         +{
             wanted => sub {
-                if (   ref $_ eq "HASH"
+                if (ref $_ eq "HASH"
                     && exists $_->{'$ref'}
                     && !ref $_->{'$ref'}
-                    && keys %$_ == 1)
+                    && keys %$_ == 1
+                    )
                 {
                     my $rv = $_->{'$ref'};
                     $rv =~ s/.*#//;
@@ -262,6 +263,47 @@ sub _validate_object {
             }
             my $val_func = "_validate_$type";
             $r .= $self->$val_func("${sympt}->{$k}", $schmpt->{properties}{$k}, "$path/$k", $required{$k});
+        }
+    }
+    if (defined $schmpt->{minProperties}) {
+        $schmpt->{minProperties} += 0;
+        $r .= "  push \@\$errors, '$path must contain not less than $schmpt->{minProperties} properties'";
+        $r .= " if keys %{$sympt} < $schmpt->{minProperties};\n";
+    }
+    if (defined $schmpt->{maxProperties}) {
+        $schmpt->{maxProperties} += 0;
+        $r .= "  push \@\$errors, '$path must contain not more than $schmpt->{maxProperties} properties'";
+        $r .= " if keys %{$sympt} > $schmpt->{minProperties};\n";
+    }
+    if (defined $schmpt->{patternProperties}) {
+        for my $pt (keys %{$schmpt->{patternProperties}}) {
+            my $type;
+            $type = $schmpt->{patternProperties}{$pt}{type} // 'string';
+            my $val_func = "_validate_$type";
+            (my $upt = $pt) =~ s/"/\\"/g;
+            my $ivf = $self->$val_func("\$_[0]", $schmpt->{patternProperties}{$pt}, "$path/$upt", "required");
+            $r .= "  { my \@props = grep {/$pt/} keys %{${sympt}};";
+            $r .= "    my \$tf = sub { $ivf };\n";
+            $r .= "    for my \$prop (\@props) {\n";
+            $r .= "      \$tf->(${sympt}->{\$prop});\n";
+            $r .= "    };\n";
+            $r .= "  }\n";
+        }
+    }
+    if (defined $schmpt->{additionalProperties}) {
+        if (!ref($schmpt->{additionalProperties}) && !$schmpt->{additionalProperties}) {
+            my %apr;
+            $r .= "  {\n";
+            if ($schmpt->{properties} && 'HASH' eq ref $schmpt->{properties}) {
+                %apr = map {_quote_var($_) => undef} keys %{$schmpt->{properties}};
+                $r .= "    my %allowed_props = (" . join(", ", keys %apr) . ");\n";
+                $r .= "    my \@unallowed_props = grep {!exists \$allowed_props{\$_} keys %{${sympt}};);\n";
+                $r .= "    push \@\$errors, '$path contains not allowed properties: \@unallowed_props'";
+                $r .= " if \@unallowed_props;\n";
+            } else {
+                $r .= "    push \@\$errors, \"$path can't contain properties\" if %{${sympt}};\n";
+            }
+            $r .= "  }\n";
         }
     }
     $r .= "}\n";
