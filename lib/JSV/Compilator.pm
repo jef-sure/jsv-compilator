@@ -10,6 +10,8 @@ use Storable 'dclone';
 use Data::Dumper;
 use Regexp::Common('RE_ALL', 'Email::Address', 'URI', 'time');
 
+our $VERSION = "0.01";
+
 sub new {
     my ($class, %args) = @_;
     bless {
@@ -20,17 +22,20 @@ sub new {
 
 sub load_schema {
     my ($self, $file) = @_;
-    croak "Unreadable file" if !-r $file;
-    if ($file =~ /\.yaml$/i || $file =~ /\.yml$/i) {
-        require YAML::XS;
-        $self->{original_schema} = YAML::XS::LoadFile($file);
-    } elsif ($file =~ /\.json/i) {
-        $self->{original_schema} = decode_json(path($file)->slurp_raw);
+    if ('HASH' eq ref $file) {
+        $self->{original_schema} = $file;
     } else {
-        croak "Unknown file type: must be .json or .yaml";
+        croak "Unreadable file" if !-r $file;
+        if ($file =~ /\.yaml$/i || $file =~ /\.yml$/i) {
+            require YAML::XS;
+            $self->{original_schema} = YAML::XS::LoadFile($file);
+        } elsif ($file =~ /\.json/i) {
+            $self->{original_schema} = decode_json(path($file)->slurp_raw);
+        } else {
+            croak "Unknown file type: must be .json or .yaml";
+        }
     }
-    $self->_resolve_references;
-    return $self;
+    return $self->_resolve_references;
 }
 
 sub _resolve_references {
@@ -63,7 +68,7 @@ sub compile {
     my ($self, %opts) = @_;
     local $self->{coersion} = $opts{coersion} // 0;
     local $self->{to_json}  = $opts{to_json}  // 0;
-    local $self->{required_modules} = {};
+    $self->{required_modules} = {};
     my $input_sym = $opts{input_symbole} // '$_[0]';
     my $schema    = $self->{full_schema};
     my $type      = 'string';
@@ -358,9 +363,9 @@ sub _validate_object {
         my ($schemas) = @_;
         my @tfa;
         for my $schm (@{$schemas}) {
-            my $type = $schm->{type} // _guess_schema_type($schm);
+            my $type     = $schm->{type} // _guess_schema_type($schm);
             my $val_func = "_validate_$type";
-            my $ivf = $self->$val_func("\$_[0]", $schm, "$rpath", "required");
+            my $ivf      = $self->$val_func("\$_[0]", $schm, "$rpath", "required");
             push @tfa, "  sub {my \$errors = []; $ivf; \@\$errors == 0}\n";
         }
         return "(" . join(",\n", @tfa) . ")";
@@ -373,27 +378,28 @@ sub _validate_object {
     if (defined $schmpt->{anyOf} and 'ARRAY' eq ref $schmpt->{anyOf}) {
         $self->{required_modules}{'List::Util'}{none} = 1;
         $r .= "  {  my \@anyOf = " . $make_schemas_array->($schmpt->{anyOf}) . ";\n";
-        $r
-            .= "    push \@\$errors, \"$rpath doesn't match any required schema\" if none { \$_->(${sympt}, \"$rpath\") } \@anyOf;";
+        $r .= "    push \@\$errors, \"$rpath doesn't match any required schema\""
+            . " if none { \$_->(${sympt}, \"$rpath\") } \@anyOf;\n";
         $r .= "  }\n";
     }
     if (defined $schmpt->{allOf} and 'ARRAY' eq ref $schmpt->{allOf}) {
         $self->{required_modules}{'List::Util'}{notall} = 1;
         $r .= "  {  my \@allOf = " . $make_schemas_array->($schmpt->{allOf}) . ";\n";
-        $r
-            .= "    push \@\$errors, \"$rpath doesn't match all required schemas\" if notall { \$_->(${sympt}, \"$rpath\") } \@allOf;";
+        $r .= "    push \@\$errors, \"$rpath doesn't match all required schemas\" "
+            . "if notall { \$_->(${sympt}, \"$rpath\") } \@allOf;\n";
         $r .= "  }\n";
     }
     if (defined $schmpt->{oneOf} and 'ARRAY' eq ref $schmpt->{oneOf}) {
         $r .= "  {  my \@oneOf = " . $make_schemas_array->($schmpt->{oneOf}) . ";\n";
-        $r .= "    my \$m = 0; for my \$t (\@oneOf) { ++\$m if \$t->(${sympt}, \"$rpath\"); last if \$m > 1; }";
-        $r .= "    push \@\$errors, \"$rpath doesn't match exactly one required schema\" if \$m != 1;";
+        $r .= "    my \$m = 0; for my \$t (\@oneOf) { ++\$m if \$t->(${sympt}, \"$rpath\"); last if \$m > 1; }\n";
+        $r .= "    push \@\$errors, \"$rpath doesn't match exactly one required schema\" if \$m != 1;\n";
         $r .= "  }\n";
     }
     if (defined $schmpt->{not} and 'ARRAY' eq ref $schmpt->{not}) {
         $self->{required_modules}{'List::Util'}{any} = 1;
         $r .= "  {  my \@notOf = " . $make_schemas_array->($schmpt->{not}) . ";\n";
-        $r .= "    push \@\$errors, \"$rpath matches a schema when must not\" if any { \$_->(${sympt}, \"$rpath\") } \@notOf;";
+        $r .= "    push \@\$errors, \"$rpath matches a schema when must not\" "
+            . " if any { \$_->(${sympt}, \"$rpath\") } \@notOf;\n";
         $r .= "  }\n";
     }
     $r .= "}\n";
@@ -449,3 +455,89 @@ sub _validate_array {
 }
 
 1;
+
+__END__
+ 
+Hide 99 lines of Pod
+=encoding utf-8
+ 
+=head1 NAME
+ 
+JSV::Compilator - Translates JSON-Schema validation rules (draft-06) into perl code
+ 
+=head1 SYNOPSIS
+ 
+  use feature qw(say);
+  use JSV::Compilator;
+ 
+  my $jsv = JSV::Compilator->new;
+  $jsv->load_schema({
+    type => "object",
+    properties => {
+      foo => { type => "integer" },
+      bar => { type => "string" }
+    },
+    required => [ "foo" ]
+  });
+  my $vcode = $jsv->compile();
+  my $test_sub_txt = <<"SUB";
+  sub { 
+      my \$errors = []; 
+      $vcode; 
+      print "\@\$errors\\n" if \@\$errors;
+      print "valid\n" if \@\$errors == 0;
+      \@\$errors == 0;
+  }
+  SUB
+  my $test_sub = eval $test_sub_txt;
+
+  $test_sub->({}); # foo is required
+  $test_sub->({ foo => 1 }); # valid
+  $test_sub->({ foo => 10, bar => "xyz" }); # valid
+  $test_sub->({ foo => 1.2, bar => "xyz" }); # foo does not look like integer number
+ 
+=head1 DESCRIPTION
+ 
+JSV::Compilator makes validation subroutine body in perl. 
+You can then use it to embed in your own validation functions.
+ 
+=head1 METHODS
+ 
+=head2 load_schema($file|$hash)
+ 
+=head2 new
+
+=head2 compile(%opts)
+
+=over
+
+=item coersion => true|false
+
+=item to_json => true|false
+
+=item input_symbole => string to use for rood data structure access
+
+=back
+
+=head1 SEE ALSO
+ 
+=over
+ 
+=item L<http://json-schema.org/>
+ 
+=item L<https://github.com/json-schema/JSON-Schema-Test-Suite>
+ 
+=back
+ 
+=head1 LICENSE
+ 
+Copyright (C) Anton Petrusevich
+ 
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+ 
+=head1 AUTHOR
+ 
+Anton Petrusevich E<lt>antonpetr@cpan.orgE<gt>
+ 
+=cut
