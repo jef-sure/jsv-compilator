@@ -1,4 +1,4 @@
-#JSV::Compilator - Translates JSON-Schema validation rules (draft-06) into perl code
+# JSV::Compilator - Translates JSON-Schema validation rules (draft-06) into perl code
  
 ## SYNOPSIS
 

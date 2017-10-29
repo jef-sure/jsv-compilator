@@ -9,6 +9,7 @@ use Carp;
 use Storable 'dclone';
 use Data::Dumper;
 use Regexp::Common('RE_ALL', 'Email::Address', 'URI', 'time');
+use Scalar::Util qw(looks_like_number);
 
 our $VERSION = "0.01";
 
@@ -70,7 +71,7 @@ sub compile {
     local $self->{to_json}  = $opts{to_json}  // 0;
     $self->{required_modules} = {};
     my $input_sym = $opts{input_symbole} // '$_[0]';
-    my $schema    = $self->{full_schema};
+    my $schema    = _norm_schema($self->{full_schema});
     my $type      = 'string';
     $type = $schema->{type} // _guess_schema_type($schema);
     my $is_required = $opts{is_required} // $type eq 'object' || 0;
@@ -88,8 +89,39 @@ sub _sympt_to_path {
     $sympt;
 }
 
+sub _norm_schema {
+    my $shmpt = $_[0];
+    return +{
+        type  => _guess_schema_type($shmpt),
+        const => $shmpt
+    } if 'HASH' ne ref $shmpt;
+    $shmpt;
+}
+
+my %type_priority = (
+    "null"    => 0,
+    "boolean" => 1,
+    "string"  => 2,
+    "integer" => 4,
+    "number"  => 3,
+    "object"  => 5,
+    "array"   => 6,
+    0         => "null",
+    1         => "boolean",
+    2         => "string",
+    3         => "integer",
+    4         => "number",
+    5         => "object",
+    6         => "array",
+);
+
 sub _guess_schema_type {
     my $shmpt = $_[0];
+    if ('HASH' ne ref $shmpt) {
+        return 'number' if looks_like_number($shmpt);
+        return 'string';
+    }
+    return $shmpt->{type} if $shmpt->{type};
     return 'object'
         if defined $shmpt->{additionalProperties}
         or $shmpt->{patternProperties}
@@ -108,6 +140,26 @@ sub _guess_schema_type {
         or defined $shmpt->{exclusiveMinimum}
         or defined $shmpt->{exclusiveMaximum}
         or defined $shmpt->{multipleOf};
+    my $max_type  = 0;
+    my $test_type = sub {
+        for (@{$shmpt->{$_[0]}}) {
+            my $gt = _guess_schema_type($_);
+            $max_type = $type_priority{$gt} if $type_priority{$gt} > $max_type;
+        }
+    };
+    if ('ARRAY' eq ref $shmpt->{allOf}) {
+        $test_type->('allOf');
+    }
+    if ('ARRAY' eq ref $shmpt->{anyOf}) {
+        $test_type->('anyOf');
+    }
+    if ('ARRAY' eq ref $shmpt->{oneOf}) {
+        $test_type->('one');
+    }
+    if ('ARRAY' eq ref $shmpt->{not}) {
+        $test_type->('not');
+    }
+    return $type_priority{$max_type} if $max_type != 0;
     return 'string';
 }
 
@@ -134,11 +186,12 @@ my %formats = (
 
 sub _validate_null {
     my ($self, $sympt, $schmptm, $path) = @_;
-    return "push \@\$errors, '$path must be null' if defined($sympt);\n";
+    return "push \@\$errors, \"$path must be null\" if not exists ($sympt) || defined($sympt);\n";
 }
 
 sub _validate_boolean {
     my ($self, $sympt, $schmpt, $path, $is_required) = @_;
+    $schmpt = _norm_schema($schmpt);
     my $r = '';
     if (defined $schmpt->{default}) {
         my $val = _quote_var($schmpt->{default});
@@ -147,7 +200,7 @@ sub _validate_boolean {
     $r .= "if(defined($sympt)) {\n";
     if (defined $schmpt->{const}) {
         $r .= "  { no warnings 'undefined';\n";
-        $r .= "    push \@\$errors, '$path must be '.($schmpt->{const}?'true':'false') if $sympt != $schmpt->{const}\n";
+        $r .= "    push \@\$errors, \"$path must be \".($schmpt->{const}?'true':'false') if $sympt != $schmpt->{const}\n";
         $r .= "  }\n";
     }
     if ($self->{to_json}) {
@@ -166,6 +219,7 @@ sub _validate_boolean {
 
 sub _validate_string {
     my ($self, $sympt, $schmpt, $path, $is_required) = @_;
+    $schmpt = _norm_schema($schmpt);
     my $r = '';
     if (defined $schmpt->{default}) {
         my $val = _quote_var($schmpt->{default});
@@ -215,6 +269,7 @@ sub _validate_string {
 
 sub _validate_any_number {
     my ($self, $sympt, $schmpt, $path, $is_required, $re, $ntype) = @_;
+    $schmpt = _norm_schema($schmpt);
     my $r = '';
     $ntype ||= '';
     if (defined $schmpt->{default}) {
@@ -281,6 +336,7 @@ sub _validate_integer {
 
 sub _validate_object {
     my ($self, $sympt, $schmpt, $path, $is_required) = @_;
+    $schmpt = _norm_schema($schmpt);
     my $rpath = !$path ? "(object)" : $path;
     my $ppref = $path  ? "$path/"   : "";
     my $r     = '';
@@ -413,6 +469,7 @@ sub _validate_object {
 
 sub _validate_array {
     my ($self, $sympt, $schmpt, $path, $is_required) = @_;
+    $schmpt = _norm_schema($schmpt);
     my $rpath = !$path ? "(object)" : $path;
     my $r = '';
     if ($schmpt->{default}) {
