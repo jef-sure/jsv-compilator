@@ -9,7 +9,7 @@ use Carp;
 use Storable 'dclone';
 use Data::Dumper;
 use Regexp::Common('RE_ALL', 'Email::Address', 'URI', 'time');
-use Scalar::Util qw(looks_like_number);
+use Scalar::Util qw(looks_like_number blessed);
 
 our $VERSION = "0.01";
 
@@ -70,10 +70,9 @@ sub compile {
     local $self->{coersion} = $opts{coersion} // 0;
     local $self->{to_json}  = $opts{to_json}  // 0;
     $self->{required_modules} = {};
-    my $input_sym = $opts{input_symbole} // '$_[0]';
-    my $schema    = _norm_schema($self->{full_schema});
-    my $type      = 'string';
-    $type = $schema->{type} // _guess_schema_type($schema);
+    my $input_sym   = $opts{input_symbole} // '$_[0]';
+    my $schema      = _norm_schema($self->{full_schema});
+    my $type        = $schema->{type} // _guess_schema_type($schema);
     my $is_required = $opts{is_required} // $type eq 'object' || 0;
     my $val_func    = "_validate_$type";
     my $val_expr    = $self->$val_func($input_sym, $schema, "", $is_required);
@@ -98,25 +97,15 @@ sub _norm_schema {
     $shmpt;
 }
 
-my %type_priority = (
-    "null"    => 0,
-    "boolean" => 1,
-    "string"  => 2,
-    "integer" => 4,
-    "number"  => 3,
-    "object"  => 5,
-    "array"   => 6,
-    0         => "null",
-    1         => "boolean",
-    2         => "string",
-    3         => "integer",
-    4         => "number",
-    5         => "object",
-    6         => "array",
-);
-
 sub _guess_schema_type {
     my $shmpt = $_[0];
+    if (my $class = blessed($shmpt)) {
+        if ($class =~ /bool/i) {
+            return 'boolean';
+        } else {
+            return 'object';
+        }
+    }
     if ('HASH' ne ref $shmpt) {
         return 'number' if looks_like_number($shmpt);
         return 'string';
@@ -140,26 +129,6 @@ sub _guess_schema_type {
         or defined $shmpt->{exclusiveMinimum}
         or defined $shmpt->{exclusiveMaximum}
         or defined $shmpt->{multipleOf};
-    my $max_type  = 0;
-    my $test_type = sub {
-        for (@{$shmpt->{$_[0]}}) {
-            my $gt = _guess_schema_type($_);
-            $max_type = $type_priority{$gt} if $type_priority{$gt} > $max_type;
-        }
-    };
-    if ('ARRAY' eq ref $shmpt->{allOf}) {
-        $test_type->('allOf');
-    }
-    if ('ARRAY' eq ref $shmpt->{anyOf}) {
-        $test_type->('anyOf');
-    }
-    if ('ARRAY' eq ref $shmpt->{oneOf}) {
-        $test_type->('one');
-    }
-    if ('ARRAY' eq ref $shmpt->{not}) {
-        $test_type->('not');
-    }
-    return $type_priority{$max_type} if $max_type != 0;
     return 'string';
 }
 
@@ -186,7 +155,11 @@ my %formats = (
 
 sub _validate_null {
     my ($self, $sympt, $schmptm, $path) = @_;
-    return "push \@\$errors, \"$path must be null\" if not exists ($sympt) || defined($sympt);\n";
+    my @sp = split /->/, $sympt;
+    my $el = pop @sp;
+    my $sh = join "->", @sp;
+    my $ec = $sh ? "|| ('HASH' eq ref($sh) && !exists  ($sympt))" : '';
+    return "push \@\$errors, \"$path must be null\" if defined($sympt) $ec;\n";
 }
 
 sub _validate_boolean {
@@ -198,9 +171,11 @@ sub _validate_boolean {
         $r = "$sympt = $val if not defined $sympt;\n";
     }
     $r .= "if(defined($sympt)) {\n";
+    $r .= $self->_validate_schemas_array($sympt, $schmpt, $path);
     if (defined $schmpt->{const}) {
-        $r .= "  { no warnings 'undefined';\n";
-        $r .= "    push \@\$errors, \"$path must be \".($schmpt->{const}?'true':'false') if $sympt != $schmpt->{const}\n";
+        $r .= "  { no warnings 'uninitialized';\n";
+        my $not = $schmpt->{const} ? 'not' : "";
+        $r .= "    push \@\$errors, \"$path must be \".($schmpt->{const}?'true':'false') if $not $sympt \n";
         $r .= "  }\n";
     }
     if ($self->{to_json}) {
@@ -226,6 +201,7 @@ sub _validate_string {
         $r = "$sympt = $val if not defined $sympt;\n";
     }
     $r .= "if(defined($sympt)) {\n";
+    $r .= $self->_validate_schemas_array($sympt, $schmpt, $path);
     if (defined $schmpt->{maxLength}) {
         $r .= "  push \@\$errors, '$path length must be not greater than ";
         $r .= "$schmpt->{maxLength}' if length($sympt) > $schmpt->{maxLength};\n";
@@ -276,7 +252,9 @@ sub _validate_any_number {
         my $val = _quote_var($schmpt->{default});
         $r = "$sympt = $val if not defined $sympt;\n";
     }
-    $r .= "if(defined($sympt)) { {\n";
+    $r .= "if(defined($sympt)) {\n";
+    $r .= $self->_validate_schemas_array($sympt, $schmpt, $path);
+    $r .= "  {\n";
     $r .= "  if($sympt !~ /^$re\$/){ push \@\$errors, '$path does not look like $ntype number'; last }\n";
     if (defined $schmpt->{minimum}) {
         $r .= "  push \@\$errors, '$path must be not less than $schmpt->{minimum}'";
@@ -334,6 +312,78 @@ sub _validate_integer {
     return $self->_validate_any_number($sympt, $schmpt, $path, $is_required, $RE{num}{int}, "integer");
 }
 
+sub _make_schemas_array {
+    my ($self, $schemas, $rpath, $type) = @_;
+    $schemas = [$schemas] if 'ARRAY' ne ref $schemas;
+    my @tfa;
+    for my $schm (@{$schemas}) {
+        my $subschm  = _norm_schema($schm);
+        my $stype    = $subschm->{type} // $type // _guess_schema_type($schm);
+        my $val_func = "_validate_$stype";
+        my $ivf      = $self->$val_func("\$_[0]", $subschm, "$rpath", "required");
+        push @tfa, "  sub {my \$errors = []; $ivf; \@\$errors == 0}\n";
+    }
+    return "(" . join(",\n", @tfa) . ")";
+}
+
+sub _validate_all_of {
+    my ($self, $schmpt, $sympt, $rpath) = @_;
+    my $r = '';
+    $self->{required_modules}{'List::Util'}{notall} = 1;
+    $r .= "  {  my \@allOf = " . $self->_make_schemas_array($schmpt->{allOf}, $rpath, $schmpt->{type}) . ";\n";
+    $r .= "    my \$stored_arg = ${sympt};\n";
+    $r .= "    push \@\$errors, \"$rpath doesn't match all required schemas\" "
+        . "if notall { \$_->(\$stored_arg, \"$rpath\") } \@allOf;\n";
+    $r .= "  }\n";
+    return $r;
+}
+
+sub _validate_any_of {
+    my ($self, $schmpt, $sympt, $rpath) = @_;
+    my $r = '';
+    $self->{required_modules}{'List::Util'}{none} = 1;
+    $r .= "  {  my \@anyOf = " . $self->_make_schemas_array($schmpt->{anyOf}, $rpath, $schmpt->{type}) . ";\n";
+    $r .= "    my \$stored_arg = ${sympt};\n";
+    $r .= "    push \@\$errors, \"$rpath doesn't match any required schema\""
+        . " if none { \$_->(\$stored_arg, \"$rpath\") } \@anyOf;\n";
+    $r .= "  }\n";
+    return $r;
+}
+
+sub _validate_one_of {
+    my ($self, $schmpt, $sympt, $rpath) = @_;
+    my $r = '';
+    $r .= "  {  my \@oneOf = " . $self->_make_schemas_array($schmpt->{oneOf}, $rpath, $schmpt->{type}) . ";\n";
+    $r .= "    my \$stored_arg = ${sympt};\n";
+    $r .= "    my \$m = 0; for my \$t (\@oneOf) { ++\$m if \$t->(\$stored_arg, \"$rpath\"); last if \$m > 1; }\n";
+    $r .= "    push \@\$errors, \"$rpath doesn't match exactly one required schema\" if \$m != 1;\n";
+    $r .= "  }\n";
+    return $r;
+}
+
+sub _validate_not_of {
+    my ($self, $schmpt, $sympt, $rpath) = @_;
+    my $r = '';
+    $self->{required_modules}{'List::Util'}{any} = 1;
+    $r .= "  {  my \@notOf = " . $self->_make_schemas_array($schmpt->{not}, $rpath, $schmpt->{type}) . ";\n";
+    $r .= "    my \$stored_arg = ${sympt};\n";
+    $r .= "    push \@\$errors, \"$rpath matches a schema when must not\" "
+        . " if any { \$_->(\$stored_arg, \"$rpath\") } \@notOf;\n";
+    $r .= "  }\n";
+    return $r;
+}
+
+sub _validate_schemas_array {
+    my ($self, $sympt, $schmpt, $path) = @_;
+    my $rpath = !$path ? "(object)" : $path;
+    my $r = '';
+    $r .= $self->_validate_any_of($schmpt, $sympt, $rpath) if defined $schmpt->{anyOf};
+    $r .= $self->_validate_all_of($schmpt, $sympt, $rpath) if defined $schmpt->{allOf};
+    $r .= $self->_validate_one_of($schmpt, $sympt, $rpath) if defined $schmpt->{oneOf};
+    $r .= $self->_validate_not_of($schmpt, $sympt, $rpath) if defined $schmpt->{not};
+    return $r;
+}
+
 sub _validate_object {
     my ($self, $sympt, $schmpt, $path, $is_required) = @_;
     $schmpt = _norm_schema($schmpt);
@@ -345,6 +395,7 @@ sub _validate_object {
         $r = "  $sympt = $val if not defined $sympt;\n";
     }
     $r .= "if('HASH' eq ref($sympt)) {\n";
+    $r .= $self->_validate_schemas_array($sympt, $schmpt, $path);
     if ($schmpt->{properties} && 'HASH' eq ref $schmpt->{properties}) {
         my %required;
         if ($schmpt->{required} && 'ARRAY' eq ref $schmpt->{required}) {
@@ -415,49 +466,6 @@ sub _validate_object {
             $r .= "  }\n";
         }
     }
-    my $make_schemas_array = sub {
-        my ($schemas) = @_;
-        my @tfa;
-        for my $schm (@{$schemas}) {
-            my $type     = $schm->{type} // _guess_schema_type($schm);
-            my $val_func = "_validate_$type";
-            my $ivf      = $self->$val_func("\$_[0]", $schm, "$rpath", "required");
-            push @tfa, "  sub {my \$errors = []; $ivf; \@\$errors == 0}\n";
-        }
-        return "(" . join(",\n", @tfa) . ")";
-    };
-    for my $fs (qw(anyOf allOf oneOf not)) {
-        if (defined $schmpt->{fs} and 'HASH' eq ref $schmpt->{fs}) {
-            $schmpt->{fs} = [$schmpt->{fs}];
-        }
-    }
-    if (defined $schmpt->{anyOf} and 'ARRAY' eq ref $schmpt->{anyOf}) {
-        $self->{required_modules}{'List::Util'}{none} = 1;
-        $r .= "  {  my \@anyOf = " . $make_schemas_array->($schmpt->{anyOf}) . ";\n";
-        $r .= "    push \@\$errors, \"$rpath doesn't match any required schema\""
-            . " if none { \$_->(${sympt}, \"$rpath\") } \@anyOf;\n";
-        $r .= "  }\n";
-    }
-    if (defined $schmpt->{allOf} and 'ARRAY' eq ref $schmpt->{allOf}) {
-        $self->{required_modules}{'List::Util'}{notall} = 1;
-        $r .= "  {  my \@allOf = " . $make_schemas_array->($schmpt->{allOf}) . ";\n";
-        $r .= "    push \@\$errors, \"$rpath doesn't match all required schemas\" "
-            . "if notall { \$_->(${sympt}, \"$rpath\") } \@allOf;\n";
-        $r .= "  }\n";
-    }
-    if (defined $schmpt->{oneOf} and 'ARRAY' eq ref $schmpt->{oneOf}) {
-        $r .= "  {  my \@oneOf = " . $make_schemas_array->($schmpt->{oneOf}) . ";\n";
-        $r .= "    my \$m = 0; for my \$t (\@oneOf) { ++\$m if \$t->(${sympt}, \"$rpath\"); last if \$m > 1; }\n";
-        $r .= "    push \@\$errors, \"$rpath doesn't match exactly one required schema\" if \$m != 1;\n";
-        $r .= "  }\n";
-    }
-    if (defined $schmpt->{not} and 'ARRAY' eq ref $schmpt->{not}) {
-        $self->{required_modules}{'List::Util'}{any} = 1;
-        $r .= "  {  my \@notOf = " . $make_schemas_array->($schmpt->{not}) . ";\n";
-        $r .= "    push \@\$errors, \"$rpath matches a schema when must not\" "
-            . " if any { \$_->(${sympt}, \"$rpath\") } \@notOf;\n";
-        $r .= "  }\n";
-    }
     $r .= "}\n";
     if ($is_required) {
         $r .= "else {\n";
@@ -477,6 +485,7 @@ sub _validate_array {
         $r = "  $sympt = $val if not defined $sympt;\n";
     }
     $r .= "if('ARRAY' eq ref($sympt)) {\n";
+    $r .= $self->_validate_schemas_array($sympt, $schmpt, $path);
     if (defined $schmpt->{minItems}) {
         $r .= "  push \@\$errors, '$path must contain not less than $schmpt->{minItems} items'";
         $r .= " if \@{$sympt} < $schmpt->{minItems};\n";
@@ -585,7 +594,16 @@ You can then use it to embed in your own validation functions.
 =item L<https://github.com/json-schema/JSON-Schema-Test-Suite>
  
 =back
- 
+
+=head1 BUGS
+
+It doesn't support all features of draft-06. For example, it doesn't support 
+array of types and some type checks work in a little bit anothe way: every 
+number in Perl is also string and C<type => "string"> will be true for numbers.
+
+It doesn't support B<contains> schema keyword. Almost everything else should 
+be working. 
+
 =head1 LICENSE
  
 Copyright (C) Anton Petrusevich

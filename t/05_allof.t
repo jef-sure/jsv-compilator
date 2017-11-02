@@ -4,6 +4,7 @@ use lib "$Bin/../t";
 use Test::Most qw(!any !none);
 use Data::Walk;
 use JSON::Pointer;
+use JSON::PP;
 use JSV::Compilator;
 use List::Util qw'none any notall';
 
@@ -76,19 +77,46 @@ my $test_suite = [
             }
         ]
     },
-#    {   "description" => "allOf simple types",
-#        "schema"      => {"allOf" => [{"maximum" => 30}, {"minimum" => 20}]},
-#        "tests"       => [
-#            {   "description" => "valid",
-#                "data"        => 25,
-#                "valid"       => 1
-#            },
-#            {   "description" => "mismatch one",
-#                "data"        => 35,
-#                "valid"       => 0
-#            }
-#        ]
-#    },
+    {   "description" => "allOf simple types",
+        "schema"      => {"allOf" => [{"maximum" => 30}, {"minimum" => 20}]},
+        "tests"       => [
+            {   "description" => "valid",
+                "data"        => 25,
+                "valid"       => 1
+            },
+            {   "description" => "mismatch one",
+                "data"        => 35,
+                "valid"       => 0
+            }
+        ]
+    },
+    {   "description" => "allOf with boolean schemas, all 1",
+        "schema"      => {"allOf" => [JSON::PP::true, JSON::PP::true]},
+        "tests"       => [
+            {   "description" => "any value is valid",
+                "data"        => "foo",
+                "valid"       => 1
+            }
+        ]
+    },
+    {   "description" => "allOf with boolean schemas, some 0",
+        "schema"      => {"allOf" => [JSON::PP::true, JSON::PP::false]},
+        "tests"       => [
+            {   "description" => "any value is invalid",
+                "data"        => "foo",
+                "valid"       => 0
+            }
+        ]
+    },
+    {   "description" => "allOf with boolean schemas, all 0",
+        "schema"      => {"allOf" => [JSON::PP::false, JSON::PP::false]},
+        "tests"       => [
+            {   "description" => "any value is invalid",
+                "data"        => "foo",
+                "valid"       => 0
+            }
+        ]
+    },
 ];
 
 for my $test (@$test_suite) {
@@ -102,11 +130,12 @@ for my $test (@$test_suite) {
     for my $tcase (@{$test->{tests}}) {
         my $tn = $test->{description} . " | " . $tcase->{description};
         if ($tcase->{valid}) {
-            ok($test_sub->($tcase->{data}), $tn);
+            ok($test_sub->($tcase->{data}), $tn) or explain $test_sub_txt;
         } else {
-            ok(!$test_sub->($tcase->{data}), $tn);
+            ok(!$test_sub->($tcase->{data}), $tn) or explain $test_sub_txt;
         }
     }
 }
 
 done_testing();
+
