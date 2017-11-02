@@ -524,7 +524,6 @@ sub _validate_array {
 
 __END__
  
-Hide 99 lines of Pod
 =encoding utf-8
  
 =head1 NAME
@@ -585,10 +584,70 @@ You can then use it to embed in your own validation functions.
 
 =back
 
+=head1 SUPPORTED KEYWORDS
+
+Following keywords are supported:
+
+=over
+
+=item multipleOf
+
+=item maximum
+
+=item exclusiveMaximum
+
+=item minimum
+
+=item exclusiveMinimum
+
+=item maxLength
+
+=item minLength
+
+=item pattern
+
+=item items
+
+=item maxItems
+
+=item minItems
+
+=item uniqueItems
+
+=item maxProperties
+
+=item minProperties
+
+=item required
+
+=item properties
+
+=item patternProperties
+
+=item additionalProperties
+
+=item enum
+
+=item const
+
+=item type (single value)
+
+=item allOf
+
+=item anyOf
+
+=item oneOf
+
+=item not
+
+=item default
+
+=back
+
 =head1 SEE ALSO
  
 =over
- 
+
 =item L<http://json-schema.org/>
  
 =item L<https://github.com/json-schema/JSON-Schema-Test-Suite>
@@ -598,11 +657,23 @@ You can then use it to embed in your own validation functions.
 =head1 BUGS
 
 It doesn't support all features of draft-06. For example, it doesn't support 
-array of types and some type checks work in a little bit anothe way: every 
-number in Perl is also string and C<type => "string"> will be true for numbers.
+array of types and some type checks work in a little bit another way: every 
+number in Perl is also string and C<type =E<gt> "string"> will be true for numbers.
 
 It doesn't support B<contains> schema keyword. Almost everything else should 
 be working. 
+
+=head2 NOT YET SUPPORTED KEYWORDS
+
+=over
+
+=item additionalItems
+
+=item contains
+
+=item propertyNames
+
+=back
 
 =head1 LICENSE
  
