@@ -4,12 +4,11 @@ use lib "$Bin/../t";
 use Test::Most qw(!any !none);
 use Data::Walk;
 use JSON::Pointer;
-use JSV::Compilator;
+use JSV::Compiler;
 use List::Util qw'none any notall';
 use feature qw(say);
-use JSV::Compilator;
 
-my $jsv = JSV::Compilator->new;
+my $jsv = JSV::Compiler->new;
 $jsv->load_schema(
     {   type       => "object",
         properties => {

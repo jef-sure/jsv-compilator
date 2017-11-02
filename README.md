@@ -1,12 +1,11 @@
-# JSV::Compilator - Translates JSON-Schema validation rules (draft-06) into perl code
+# JSV::Compiler - Translates JSON-Schema validation rules (draft-06) into perl code
  
 ## SYNOPSIS
 
 ```perl
-  use feature qw(say);
-  use JSV::Compilator;
+  use JSV::Compiler;
  
-  my $jsv = JSV::Compilator->new;
+  my $jsv = JSV::Compiler->new;
   $jsv->load_schema({
     type => "object",
     properties => {

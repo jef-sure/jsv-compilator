@@ -2,9 +2,9 @@ use FindBin qw($Bin);
 use lib "$Bin/../lib";
 use lib "$Bin/../t";
 use Test::Most;
-use JSV::Compilator;
+use JSV::Compiler;
 
-my $jsc = JSV::Compilator->new();
+my $jsc = JSV::Compiler->new();
 $jsc->{full_schema} = {
     "\$schema"    => "http://json-schema.org/draft-06/schema#",
     "title"       => "Product",

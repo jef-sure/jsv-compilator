@@ -1,6 +1,6 @@
 use ExtUtils::MakeMaker;
 WriteMakefile(
-    NAME             => "JSV::Compilator",
+    NAME             => "JSV::Compiler",
     AUTHOR           => "Anton Petrusevich",
     VERSION          => "0.01",
     INSTALLDIRS      => 'site',

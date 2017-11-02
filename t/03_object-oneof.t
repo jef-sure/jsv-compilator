@@ -4,10 +4,10 @@ use lib "$Bin/../t";
 use Test::Most qw(!any !none);
 use Data::Walk;
 use JSON::Pointer;
-use JSV::Compilator;
+use JSV::Compiler;
 use List::Util qw'none any notall';
 
-my $jsc          = JSV::Compilator->new();
+my $jsc          = JSV::Compiler->new();
 my $entry_schema = {
     "id"          => "http://some.site.somewhere/entry-schema#",
     "\$schema"    => "http://json-schema.org/draft-06/schema#",

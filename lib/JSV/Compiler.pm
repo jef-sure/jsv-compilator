@@ -1,4 +1,4 @@
-package JSV::Compilator;
+package JSV::Compiler;
 use strict;
 use warnings;
 use Data::Walk;
@@ -528,14 +528,13 @@ __END__
  
 =head1 NAME
  
-JSV::Compilator - Translates JSON-Schema validation rules (draft-06) into perl code
+JSV::Compiler - Translates JSON-Schema validation rules (draft-06) into perl code
  
 =head1 SYNOPSIS
  
-  use feature qw(say);
-  use JSV::Compilator;
+  use JSV::Compiler;
  
-  my $jsv = JSV::Compilator->new;
+  my $jsv = JSV::Compiler->new;
   $jsv->load_schema({
     type => "object",
     properties => {
@@ -563,7 +562,7 @@ JSV::Compilator - Translates JSON-Schema validation rules (draft-06) into perl c
  
 =head1 DESCRIPTION
  
-JSV::Compilator makes validation subroutine body in perl. 
+JSV::Compiler makes validation subroutine body in perl. 
 You can then use it to embed in your own validation functions.
  
 =head1 METHODS
