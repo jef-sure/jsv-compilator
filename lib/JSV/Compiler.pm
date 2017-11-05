@@ -1,23 +1,23 @@
 package JSV::Compiler;
 use strict;
 use warnings;
-use Data::Walk;
 use JSON;
 use JSON::Pointer;
+use URI;
 use Path::Tiny;
 use Carp;
 use Storable 'dclone';
 use Data::Dumper;
 use Regexp::Common('RE_ALL', 'Email::Address', 'URI', 'time');
-use Scalar::Util qw(looks_like_number blessed);
+use Scalar::Util qw(looks_like_number blessed weaken reftype);
 
-our $VERSION = "0.01";
+our $VERSION = "0.02";
 
 sub new {
     my ($class, %args) = @_;
     bless {
         original_schema => {},
-        full_schema     => {}
+        full_schema     => {},
     }, $class;
 }
 
@@ -39,30 +39,92 @@ sub load_schema {
     return $self->_resolve_references;
 }
 
+sub _deep_walk {
+    my $visitor = shift;
+    my $recurse;
+    local $_;
+    $recurse = sub {
+        my ($cnode) = @_;
+        my $ctype = reftype $cnode;
+        if ($ctype eq 'ARRAY') {
+            my $index = 0;
+            for (@$cnode) {
+                my $dtype = reftype $_;
+                if ($dtype && ($dtype eq 'HASH' || $dtype eq 'ARRAY')) {
+                    $recurse->($_, $cnode);
+                }
+                $visitor->($ctype, $cnode, $index++);
+            }
+        } elsif ($ctype eq 'HASH') {
+            for my $k (keys %$cnode) {
+                local $_ = $cnode->{$k};
+                my $dtype = reftype $_;
+                if ($dtype && ($dtype eq 'HASH' || $dtype eq 'ARRAY')) {
+                    $recurse->($_, $cnode);
+                }
+                $visitor->($ctype, $cnode, $k);
+            }
+        }
+    };
+    $recurse->($_[0]);
+    $_ = $_[0];
+    $visitor->('ARRAY', \@_, 0);
+}
+
 sub _resolve_references {
     my $self = $_[0];
     $self->{full_schema} = dclone $self->{original_schema};
-    walkdepth(
-        +{
-            wanted => sub {
-                if (   ref $_ eq "HASH"
-                    && exists $_->{'$ref'}
-                    && !ref $_->{'$ref'}
-                    && keys %$_ == 1)
-                {
-                    my $rv = $_->{'$ref'};
-                    $rv =~ s/.*#//;
-                    my $rp = JSON::Pointer->get($self->{full_schema}, $rv);
-                    if ('HASH' eq ref $rp) {
-                        %$_ = %$rp;
+    my $base_uri = $self->{full_schema}{id} || $self->{full_schema}{'$id'};
+    if ($base_uri) {
+        $base_uri = URI->new($base_uri)->canonical();
+        $base_uri->fragment("") if not $base_uri->fragment;
+        $self->{schemas}{$base_uri} = $self->{full_schema};
+    }
+    my @unresolved;
+    my %unresolved;
+    my $resolve = sub {
+        my ($ref) = @_;
+        my $uri = $base_uri ? URI->new_abs($ref, $base_uri)->canonical : URI->new($ref)->canonical;
+        return $self->{schemas}{$uri} if $self->{schemas}{$uri};
+        my $su = $uri->clone;
+        $su->fragment("");
+        if ($self->{schemas}{$su}) {
+            my $rs = JSON::Pointer->get($self->{schemas}{$su}, $uri->fragment);
+            return $rs if $rs;
+        }
+        push @unresolved, "$su" if not $unresolved{$su}++;
+        return undef;
+    };
+    _deep_walk(
+        sub {
+            my ($ctype, $cnode, $index) = @_;
+            if (   $ctype eq 'ARRAY'
+                && 'HASH' eq ref $_
+                && keys %$_ == 1
+                && $_->{'$ref'}
+                && !ref($_->{'$ref'}))
+            {
+                weaken($cnode->[$index] = $resolve->($_->{'$ref'}));
+            } elsif ('HASH' eq ref $_) {
+                for my $k (keys %$_) {
+                    my $v = $_->{$k};
+                    if ('HASH' eq ref($v) && keys(%$v) == 1 && $v->{'$ref'} && !ref($v->{'$ref'})) {
+                        weaken($_->{$k} = $resolve->($v->{'$ref'}));
+                    } elsif ($k eq '$ref' && !ref($_->{$k})) {
+                        my $r = $resolve->($_->{$k});
+                        if ($r && 'HASH' eq ref $r) {
+                            weaken($cnode->{$index} = $r);
+                        }
+                    } elsif (($k eq 'id' || $k eq '$id') && !ref($v)) {
+                        my $id = $base_uri ? URI->new_abs($v, $base_uri)->canonical : URI->new($v)->canonical;
+                        weaken($self->{schemas}{$id} = $_) if not $self->{schemas}{$id};
                     }
-
                 }
-            },
+            }
         },
         $self->{full_schema}
     );
-    return $self;
+    return wantarray ? @unresolved : $self;
 }
 
 sub compile {
@@ -568,6 +630,11 @@ You can then use it to embed in your own validation functions.
 =head1 METHODS
  
 =head2 load_schema($file|$hash)
+
+Loads and registers schema. 
+In list context returns list of URLs of unresolved schemas. You should
+load all unresolved schemas and then load this one more time.
+In scalar context returns C<$self>.
  
 =head2 new
 

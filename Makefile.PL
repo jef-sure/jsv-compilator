@@ -2,7 +2,7 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
     NAME             => "JSV::Compiler",
     AUTHOR           => "Anton Petrusevich",
-    VERSION          => "0.01",
+    VERSION          => "0.02",
     INSTALLDIRS      => 'site',
     LICENSE          => "artistic_2",
     MIN_PERL_VERSION => "5.008000",
@@ -18,7 +18,6 @@ WriteMakefile(
         },
     },
     PREREQ_PM => {
-        'Data::Walk'                     => "0.52",
         'JSON'                           => 0,
         'YAML::XS'                       => 0,
         'JSON::Pointer'                  => 0,

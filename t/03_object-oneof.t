@@ -2,7 +2,6 @@ use FindBin qw($Bin);
 use lib "$Bin/../lib";
 use lib "$Bin/../t";
 use Test::Most qw(!any !none);
-use Data::Walk;
 use JSON::Pointer;
 use JSV::Compiler;
 use List::Util qw'none any notall';
@@ -86,37 +85,31 @@ my $entry_schema = {
     },
 };
 
-# resolve references inside entry schema
-walkdepth(
-    +{
-        wanted => sub {
-            if (   ref $_ eq "HASH"
-                && exists $_->{'$ref'}
-                && !ref $_->{'$ref'}
-                && keys %$_ == 1)
-            {
-                my $rv = $_->{'$ref'};
-                $rv =~ s/.*#//;
-                my $rp = JSON::Pointer->get($entry_schema, $rv);
-                if ('HASH' eq ref $rp) {
-                    %$_ = %$rp;
-                }
-
-            }
-        },
-    },
-    $entry_schema
-);
-
-$jsc->load_schema(
+my @u = $jsc->load_schema(
     {   "\$schema"             => "http://json-schema.org/draft-06/schema#",
         "type"                 => "object",
-        "properties"           => {"/" => $entry_schema},
-        "patternProperties"    => {"^(/[^/]+)+\$" => $entry_schema},
+        "properties"           => {"/" => {"\$ref" => "http://some.site.somewhere/entry-schema#"}},
+        "patternProperties"    => {"^(/[^/]+)+\$" => {"\$ref" => "http://some.site.somewhere/entry-schema#"}},
         "additionalProperties" => 0,
         "required"             => ["/"]
     }
 );
+
+is_deeply(\@u, ["http://some.site.somewhere/entry-schema#"], "unresolved reference");
+
+$jsc->load_schema($entry_schema);
+
+@u = $jsc->load_schema(
+    {   "\$schema"             => "http://json-schema.org/draft-06/schema#",
+        "type"                 => "object",
+        "properties"           => {"/" => {"\$ref" => "http://some.site.somewhere/entry-schema#"}},
+        "patternProperties"    => {"^(/[^/]+)+\$" => {"\$ref" => "http://some.site.somewhere/entry-schema#"}},
+        "additionalProperties" => 0,
+        "required"             => ["/"]
+    }
+);
+
+ok(!@u, "all references resolved");
 
 my $ok_path = [
     {
@@ -156,7 +149,8 @@ my $bad_path = [{"/home" => {},},];
 
 my $res = $jsc->compile();
 ok($res, "Compiled");
-my $test_sub_txt = "sub { my \$errors = []; $res; print \"\@\$errors\\n\" if \@\$errors; return \@\$errors == 0 }\n";
+my $errors;
+my $test_sub_txt = "sub { \$errors = []; $res; print \"\@\$errors\\n\" if \@\$errors; return \@\$errors == 0 }\n";
 my $test_sub     = eval $test_sub_txt;
 
 is($@, '', "Successfully compiled");
@@ -166,9 +160,10 @@ for my $p (@$ok_path) {
     ok($test_sub->($p), "Tested path");
 }
 
-for my $p (@$bad_path) {
-    ok(!$test_sub->($p), "Tested path") or explain $res;
-}
+my $p = $bad_path->[0];
+ok(!$test_sub->($p), "Tested bad path") or explain $res;
+my @errors = sort @$errors;
+is("@errors", "/ is required /home/storage is required", "errors catched");
 
 done_testing();
 
