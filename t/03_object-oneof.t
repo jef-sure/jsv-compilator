@@ -4,7 +4,7 @@ use lib "$Bin/../t";
 use Test::Most qw(!any !none);
 use JSON::Pointer;
 use JSV::Compiler;
-use List::Util qw'none any notall';
+use Module::Load;
 
 my $jsc          = JSV::Compiler->new();
 my $entry_schema = {
@@ -147,7 +147,10 @@ my $ok_path = [
 
 my $bad_path = [{"/home" => {},},];
 
-my $res = $jsc->compile();
+my ($res, %load) = $jsc->compile();
+for my $m (keys %load) {
+    load $m, @{$load{$m}} ? @{$load{$m}} : ();
+}
 ok($res, "Compiled");
 my $errors;
 my $test_sub_txt = "sub { \$errors = []; $res; print \"\@\$errors\\n\" if \@\$errors; return \@\$errors == 0 }\n";

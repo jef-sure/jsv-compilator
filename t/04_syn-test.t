@@ -2,10 +2,8 @@ use FindBin qw($Bin);
 use lib "$Bin/../lib";
 use lib "$Bin/../t";
 use Test::Most qw(!any !none);
-use Data::Walk;
-use JSON::Pointer;
 use JSV::Compiler;
-use List::Util qw'none any notall';
+use Module::Load;
 use feature qw(say);
 
 my $jsv = JSV::Compiler->new;
@@ -19,7 +17,10 @@ $jsv->load_schema(
     }
 );
 
-my $vcode = $jsv->compile();
+my ($vcode, %load) = $jsv->compile();
+for my $m (keys %load) {
+    load $m, @{$load{$m}} ? @{$load{$m}} : ();
+}
 
 my $test_sub_txt = <<"SUB";
   sub { 

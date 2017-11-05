@@ -11,7 +11,7 @@ use Data::Dumper;
 use Regexp::Common('RE_ALL', 'Email::Address', 'URI', 'time');
 use Scalar::Util qw(looks_like_number blessed weaken reftype);
 
-our $VERSION = "0.02";
+our $VERSION = "0.03";
 
 sub new {
     my ($class, %args) = @_;
@@ -138,17 +138,13 @@ sub compile {
     my $is_required = $opts{is_required} // $type eq 'object' || 0;
     my $val_func    = "_validate_$type";
     my $val_expr    = $self->$val_func($input_sym, $schema, "", $is_required);
-    return $val_expr;
+    return
+        wantarray
+        ? ($val_expr, map {$_ => [sort keys %{$self->{required_modules}{$_}}]} keys %{$self->{required_modules}})
+        : $val_expr;
 }
 
 # type: six primitive types ("null", "boolean", "object", "array", "number", or "string"), or "integer"
-
-sub _sympt_to_path {
-    my ($sympt) = @_;
-    $sympt =~ s!^[^\{\}]+!/!;
-    $sympt =~ s![\{\}]+!/!g;
-    $sympt;
-}
 
 sub _norm_schema {
     my $shmpt = $_[0];
@@ -595,7 +591,8 @@ JSV::Compiler - Translates JSON-Schema validation rules (draft-06) into perl cod
 =head1 SYNOPSIS
  
   use JSV::Compiler;
- 
+  use Module::Load;
+  
   my $jsv = JSV::Compiler->new;
   $jsv->load_schema({
     type => "object",
@@ -605,7 +602,13 @@ JSV::Compiler - Translates JSON-Schema validation rules (draft-06) into perl cod
     },
     required => [ "foo" ]
   });
-  my $vcode = $jsv->compile();
+
+  my ($vcode, %load) = $jsv->compile();
+
+  for my $m (keys %load) {
+    load $m, @{$load{$m}} ? @{$load{$m}} : ();
+  }
+
   my $test_sub_txt = <<"SUB";
   sub { 
       my \$errors = []; 
@@ -639,6 +642,14 @@ In scalar context returns C<$self>.
 =head2 new
 
 =head2 compile(%opts)
+
+  my ($vcode, %load) = $jsv->compile();
+  for my $m (keys %load) {
+    load $m, @{$load{$m}} ? @{$load{$m}} : ();
+  }
+
+Returns compiled perl text. In list context it adds list of required modules
+with array of their required import symbols.
 
 =over
 

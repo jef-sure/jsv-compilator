@@ -3,7 +3,7 @@ use lib "$Bin/../lib";
 use lib "$Bin/../t";
 use Test::Most qw(!any !none);
 use JSV::Compiler;
-use List::Util qw'none any notall';
+use Module::Load;
 
 my $jsc = JSV::Compiler->new();
 $jsc->{full_schema} = {
@@ -32,7 +32,10 @@ my $bad_path = [
     },
 ];
 
-my $res = $jsc->compile();
+my ($res, %load) = $jsc->compile();
+for my $m (keys %load) {
+    load $m, @{$load{$m}} ? @{$load{$m}} : ();
+}
 ok( $res, "Compiled" );
 my $test_sub_txt = "sub { my \$errors = []; $res; print \"\@\$errors\\n\" if \@\$errors; return \@\$errors == 0 }\n";
 my $test_sub     = eval $test_sub_txt;
