@@ -24,7 +24,7 @@ WriteMakefile(
         'Path::Tiny'                     => 0,
         'Storable'                       => 0,
         'Data::Dumper'                   => 0,
-        'List::Util'                     => 0,
+        'List::Util'                     => '1.33',
         'Regexp::Common'                 => 0,
         'Regexp::Common::time'           => 0,
         'Regexp::Common::Email::Address' => 0,
