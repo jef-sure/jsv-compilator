@@ -18,6 +18,7 @@ sub new {
     bless {
         original_schema => {},
         full_schema     => {},
+        strict          => $args{strict} // 0,
     }, $class;
 }
 
@@ -227,7 +228,7 @@ sub _validate_boolean {
     my ($self, $sympt, $schmpt, $path, $is_required) = @_;
     $schmpt = _norm_schema($schmpt);
     my $r = '';
-    if (exists $schmpt->{default}) {
+    if (!($is_required && $self->{strict}) && exists $schmpt->{default}) {
         my $val = _quote_var($schmpt->{default});
         $r = "$sympt = $val if not defined $sympt;\n";
     }
@@ -257,7 +258,7 @@ sub _validate_string {
     my ($self, $sympt, $schmpt, $path, $is_required) = @_;
     $schmpt = _norm_schema($schmpt);
     my $r = '';
-    if (defined $schmpt->{default}) {
+    if (!($is_required && $self->{strict}) && defined $schmpt->{default}) {
         my $val = _quote_var($schmpt->{default});
         $r = "$sympt = $val if not defined $sympt;\n";
     }
@@ -309,7 +310,7 @@ sub _validate_any_number {    ## no critic (Subroutines::ProhibitManyArgs Subrou
     $schmpt = _norm_schema($schmpt);
     my $r = '';
     $ntype ||= '';
-    if (defined $schmpt->{default}) {
+    if (!($is_required && $self->{strict}) && defined $schmpt->{default}) {
         my $val = _quote_var($schmpt->{default});
         $r = "$sympt = $val if not defined $sympt;\n";
     }
@@ -461,7 +462,7 @@ sub _validate_object {    ## no critic (Subroutines::ProhibitExcessComplexity)
     my $rpath = !$path ? "(object)" : $path;
     my $ppref = $path  ? "$path/"   : "";
     my $r     = '';
-    if ($schmpt->{default}) {
+    if (!($is_required && $self->{strict}) && $schmpt->{default}) {
         my $val = _quote_var($schmpt->{default});
         $r = "  $sympt = $val if not defined $sympt;\n";
     }
@@ -555,7 +556,7 @@ sub _validate_array {
     $schmpt = _norm_schema($schmpt);
     my $rpath = !$path ? "(object)" : $path;
     my $r = '';
-    if ($schmpt->{default}) {
+    if (!($is_required && $self->{strict}) && $schmpt->{default}) {
         my $val = _quote_var($schmpt->{default});
         $r = "  $sympt = $val if not defined $sympt;\n";
     }
@@ -656,7 +657,13 @@ In list context returns list of URLs of unresolved schemas. You should
 load all unresolved schemas and then load this one more time.
 In scalar context returns C<$self>.
  
-=head2 new
+=head2 new(%args)
+
+=over
+
+=item strict => 0|1 (defaults to 0) -- "reqired" over "default" priority
+
+=back
 
 =head2 compile(%opts)
 
