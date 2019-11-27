@@ -11,7 +11,7 @@ use Data::Dumper;
 use Regexp::Common('RE_ALL', 'Email::Address', 'URI', 'time');
 use Scalar::Util qw(looks_like_number blessed weaken reftype);
 
-our $VERSION = "0.06";
+our $VERSION = "0.07";
 
 sub new {
     my ($class, %args) = @_;
