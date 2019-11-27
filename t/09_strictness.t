@@ -7,7 +7,7 @@ use Module::Load;
 
 sub _run {
     my %args = @_;
-    my $jsc = JSV::Compiler->new(strict => $args{strict});
+    my $jsc = JSV::Compiler->new();
     $jsc->{full_schema} = {
         "\$schema"   => "http://json-schema.org/draft-06/schema#",
         "type"       => "object",
@@ -32,7 +32,7 @@ sub _run {
         },
     ];
     
-    my ($res, %load) = $jsc->compile();
+    my ($res, %load) = $jsc->compile(is_strict => $args{strict});
     for my $m (keys %load) {
         load $m, @{$load{$m}} ? @{$load{$m}} : ();
     }

@@ -18,7 +18,6 @@ sub new {
     bless {
         original_schema => {},
         full_schema     => {},
-        strict          => $args{strict} // 0,
     }, $class;
 }
 
@@ -135,6 +134,7 @@ sub compile {
     local $self->{coercion} = $opts{coercion} // $opts{coersion} // 0;
     local $self->{to_json}  = $opts{to_json}  // 0;
     $self->{required_modules} = {};
+    $self->{strict} = $opts{is_strict} // 0;
     my $input_sym   = $opts{input_symbole} // '$_[0]';
     my $schema      = _norm_schema($self->{full_schema});
     my $type        = $schema->{type} // _guess_schema_type($schema);
@@ -657,13 +657,7 @@ In list context returns list of URLs of unresolved schemas. You should
 load all unresolved schemas and then load this one more time.
 In scalar context returns C<$self>.
  
-=head2 new(%args)
-
-=over
-
-=item strict => 0|1 (defaults to 0) -- "reqired" over "default" priority
-
-=back
+=head2 new
 
 =head2 compile(%opts)
 
@@ -682,6 +676,8 @@ with array of their required import symbols.
 =item to_json => true|false
 
 =item input_symbole => string to use for rood data structure access
+
+=item is_strict => true|false (default: false) "reqired" over "default" priority
 
 =back
 
